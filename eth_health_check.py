@@ -1,67 +1,73 @@
 #!/usr/bin/env python3
 """
-Simple Ethereum Node Health Checker
-Just run this script and enter your RPC URLs when prompted
+Ethereum Validator Node Readiness Checker
+Checks if your Beacon Chain and Sepolia nodes are ready for validator duties
+Minimal dependencies - only uses Python standard library + requests
 """
 
-import requests
+import json
 import socket
 import sys
+import time
+import urllib.request
+import urllib.parse
+import urllib.error
 from datetime import datetime
 
-# Simple color support (works without colorama)
-class Colors:
-    RED = '\033[0;31m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    BLUE = '\033[0;34m'
-    CYAN = '\033[0;36m'
-    WHITE = '\033[0;37m'
+# Simple color codes (no external dependencies)
+class Color:
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
     BOLD = '\033[1m'
     END = '\033[0m'
 
-def print_colored(message, color=Colors.WHITE):
-    """Print colored message"""
-    print(f"{color}{message}{Colors.END}")
+def print_colored(text, color=Color.WHITE):
+    """Print colored text"""
+    print(f"{color}{text}{Color.END}")
 
 def print_header():
-    """Print welcome header"""
-    print_colored("\n" + "="*60, Colors.BLUE)
-    print_colored("🚀 ETHEREUM NODE HEALTH CHECKER", Colors.CYAN + Colors.BOLD)
-    print_colored("Enter your node URLs and get instant health status", Colors.WHITE)
-    print_colored("="*60, Colors.BLUE)
+    """Print application header"""
+    print_colored("\n" + "="*65, Color.BLUE)
+    print_colored("🔥 ETHEREUM VALIDATOR READINESS CHECKER", Color.CYAN + Color.BOLD)
+    print_colored("Check if your nodes are ready for validator duties", Color.WHITE)
+    print_colored("="*65, Color.BLUE)
 
 def get_user_input():
-    """Get RPC URLs from user"""
-    print_colored("\n📝 Please enter your node information:", Colors.YELLOW + Colors.BOLD)
+    """Get RPC URLs from user with examples"""
+    print_colored("\n📝 Enter your node URLs:", Color.YELLOW + Color.BOLD)
     print()
     
-    # Get Beacon Chain URL
-    print_colored("🔗 Beacon Chain Node:", Colors.CYAN)
-    print("   Examples: http://localhost:5052, http://192.168.1.100:5052")
+    print_colored("🔗 Beacon Chain Node URL:", Color.CYAN)
+    print("   Examples:")
+    print("   • http://localhost:5052")
+    print("   • http://192.168.1.100:5052") 
+    print("   • https://beacon-node.yourdomain.com")
     beacon_url = input("   Enter Beacon URL: ").strip()
     
-    # Default to localhost if empty
     if not beacon_url:
         beacon_url = "http://localhost:5052"
-        print_colored(f"   Using default: {beacon_url}", Colors.YELLOW)
+        print_colored(f"   → Using default: {beacon_url}", Color.YELLOW)
     
     print()
-    
-    # Get Sepolia RPC URL  
-    print_colored("🔗 Sepolia RPC Node:", Colors.CYAN)
-    print("   Examples: http://localhost:8545, http://192.168.1.100:8545")
+    print_colored("🔗 Sepolia RPC Node URL:", Color.CYAN)
+    print("   Examples:")
+    print("   • http://localhost:8545")
+    print("   • http://192.168.1.100:8545")
+    print("   • https://sepolia-rpc.yourdomain.com")
     sepolia_url = input("   Enter Sepolia URL: ").strip()
     
-    # Default to localhost if empty
     if not sepolia_url:
         sepolia_url = "http://localhost:8545"
-        print_colored(f"   Using default: {sepolia_url}", Colors.YELLOW)
+        print_colored(f"   → Using default: {sepolia_url}", Color.YELLOW)
     
     return beacon_url, sepolia_url
 
-def test_port(host, port, timeout=10):
-    """Test if port is accessible"""
+def test_connection(host, port, timeout=5):
+    """Test TCP connection"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -72,293 +78,320 @@ def test_port(host, port, timeout=10):
         return False
 
 def parse_url(url):
-    """Parse URL to get host and port"""
+    """Parse URL to extract host and port"""
     try:
         if "://" in url:
-            protocol, rest = url.split("://", 1)
-            if ":" in rest:
-                host, port_part = rest.split(":", 1)
-                port = int(port_part.split("/")[0])
+            parts = url.split("://", 1)
+            protocol = parts[0]
+            rest = parts[1]
+            
+            if ":" in rest and "/" not in rest.split(":")[-1]:
+                host, port = rest.rsplit(":", 1)
+                port = int(port)
             else:
                 host = rest.split("/")[0]
-                port = 443 if protocol == "https" else 80
+                port = 443 if protocol == "https" else (5052 if "5052" in url else 8545)
         else:
             if ":" in url:
-                host, port = url.split(":")
+                host, port = url.rsplit(":", 1)
                 port = int(port)
             else:
                 host = url
-                port = 80
+                port = 5052 if "5052" in url else 8545
         return host, port
     except:
         return None, None
 
-def check_beacon_node(url):
-    """Check Beacon Chain node health"""
-    print_colored("\n🔍 CHECKING BEACON CHAIN NODE", Colors.YELLOW + Colors.BOLD)
-    print_colored("-" * 35, Colors.YELLOW)
+def http_request(url, data=None, timeout=10):
+    """Make HTTP request using urllib (no external dependencies)"""
+    try:
+        if data:
+            data = json.dumps(data).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+        else:
+            req = urllib.request.Request(url)
+        
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return response.getcode(), json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as e:
+        return e.code, None
+    except Exception:
+        return None, None
+
+def check_beacon_validator_readiness(url):
+    """Check if Beacon node is ready for validator duties"""
+    print_colored("\n🔍 CHECKING BEACON CHAIN - VALIDATOR READINESS", Color.YELLOW + Color.BOLD)
+    print_colored("-" * 50, Color.YELLOW)
     
-    # Parse URL
     host, port = parse_url(url)
     if not host:
-        print_colored("❌ Invalid URL format", Colors.RED)
-        return False
+        print_colored("❌ Invalid Beacon URL format", Color.RED)
+        return {"ready": False, "score": 0}
     
-    # Test connection
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] Testing connection to {host}:{port}...")
+    results = {"ready": False, "score": 0, "issues": []}
     
-    if not test_port(host, port):
-        print_colored(f"❌ Cannot connect to {host}:{port}", Colors.RED)
-        print_colored("   Possible issues:", Colors.YELLOW)
-        print("   • Beacon node is not running")
-        print("   • Port 5052 is blocked by firewall")
-        print("   • Wrong IP address or port")
-        return False
+    # Test 1: Connection
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Testing connection to {host}:{port}...")
+    if not test_connection(host, port):
+        print_colored(f"❌ Cannot connect to {host}:{port}", Color.RED)
+        results["issues"].append("Connection failed")
+        return results
     
-    print_colored(f"✅ Port {port} is accessible", Colors.GREEN)
+    print_colored(f"✅ Connection successful", Color.GREEN)
+    results["score"] += 20
     
-    # Test Beacon API
-    try:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking beacon node health...")
-        response = requests.get(f"{url}/eth/v1/node/health", timeout=15)
-        
-        if response.status_code == 200:
-            print_colored("✅ Beacon node is healthy and responding", Colors.GREEN)
-            
-            # Check sync status
-            try:
-                sync_response = requests.get(f"{url}/eth/v1/node/syncing", timeout=15)
-                if sync_response.status_code == 200:
-                    sync_data = sync_response.json()
-                    is_syncing = sync_data.get("data", {}).get("is_syncing", True)
-                    if not is_syncing:
-                        print_colored("✅ Beacon node is fully synced", Colors.GREEN)
-                    else:
-                        print_colored("⚠️  Beacon node is still syncing (this is normal)", Colors.YELLOW)
-            except:
-                print_colored("⚠️  Could not check sync status", Colors.YELLOW)
-            
-            # Check peers
-            try:
-                peers_response = requests.get(f"{url}/eth/v1/node/peers", timeout=15)
-                if peers_response.status_code == 200:
-                    peers_data = peers_response.json()
-                    peer_count = len(peers_data.get("data", []))
-                    if peer_count > 0:
-                        print_colored(f"✅ Connected to {peer_count} peers", Colors.GREEN)
-                    else:
-                        print_colored("⚠️  No peers connected", Colors.YELLOW)
-                else:
-                    print_colored("⚠️  Could not check peer count", Colors.YELLOW)
-            except:
-                print_colored("⚠️  Could not check peer count", Colors.YELLOW)
-            
-            return True
-            
+    # Test 2: Node Health
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking node health...")
+    status_code, _ = http_request(f"{url}/eth/v1/node/health")
+    if status_code == 200:
+        print_colored("✅ Node is healthy", Color.GREEN)
+        results["score"] += 25
+    else:
+        print_colored("❌ Node health check failed", Color.RED)
+        results["issues"].append("Node unhealthy")
+        return results
+    
+    # Test 3: Sync Status (Critical for validators)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking sync status...")
+    status_code, sync_data = http_request(f"{url}/eth/v1/node/syncing")
+    if status_code == 200 and sync_data:
+        is_syncing = sync_data.get("data", {}).get("is_syncing", True)
+        if not is_syncing:
+            print_colored("✅ Node is fully synced - READY FOR VALIDATOR", Color.GREEN)
+            results["score"] += 30
         else:
-            print_colored(f"❌ Beacon node health check failed (HTTP {response.status_code})", Colors.RED)
-            print_colored("   Possible issues:", Colors.YELLOW)
-            print("   • Beacon node API is not enabled")
-            print("   • Wrong URL or endpoint")
-            return False
-            
-    except requests.exceptions.Timeout:
-        print_colored("❌ Request timeout - beacon node is too slow to respond", Colors.RED)
-        return False
-    except requests.exceptions.ConnectionError:
-        print_colored("❌ Connection failed - beacon node API not accessible", Colors.RED)
-        return False
-    except Exception as e:
-        print_colored(f"❌ Error: {str(e)}", Colors.RED)
-        return False
-
-def check_sepolia_rpc(url):
-    """Check Sepolia RPC node health"""
-    print_colored("\n🔍 CHECKING SEPOLIA RPC NODE", Colors.YELLOW + Colors.BOLD)
-    print_colored("-" * 32, Colors.YELLOW)
+            print_colored("❌ Node is still syncing - NOT READY FOR VALIDATOR", Color.RED)
+            results["issues"].append("Still syncing")
+            return results
+    else:
+        print_colored("⚠️  Could not verify sync status", Color.YELLOW)
+        results["issues"].append("Sync status unknown")
     
-    # Parse URL
+    # Test 4: Peer Count (Important for attestations)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking peer connections...")
+    status_code, peers_data = http_request(f"{url}/eth/v1/node/peers")
+    if status_code == 200 and peers_data:
+        peer_count = len(peers_data.get("data", []))
+        if peer_count >= 50:
+            print_colored(f"✅ Excellent peer count: {peer_count} (optimal for validators)", Color.GREEN)
+            results["score"] += 15
+        elif peer_count >= 20:
+            print_colored(f"✅ Good peer count: {peer_count} (sufficient for validators)", Color.GREEN)
+            results["score"] += 10
+        elif peer_count >= 5:
+            print_colored(f"⚠️  Low peer count: {peer_count} (risky for validators)", Color.YELLOW)
+            results["score"] += 5
+            results["issues"].append("Low peer count")
+        else:
+            print_colored(f"❌ Very low peer count: {peer_count} (dangerous for validators)", Color.RED)
+            results["issues"].append("Critical: Very low peers")
+    
+    # Test 5: Response Time (Critical for attestations)
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Testing response time...")
+    start_time = time.time()
+    status_code, _ = http_request(f"{url}/eth/v1/beacon/headers/head")
+    response_time = (time.time() - start_time) * 1000
+    
+    if response_time < 500:
+        print_colored(f"✅ Excellent response time: {response_time:.0f}ms", Color.GREEN)
+        results["score"] += 10
+    elif response_time < 1000:
+        print_colored(f"✅ Good response time: {response_time:.0f}ms", Color.GREEN)
+        results["score"] += 5
+    elif response_time < 2000:
+        print_colored(f"⚠️  Slow response time: {response_time:.0f}ms", Color.YELLOW)
+        results["issues"].append("Slow response")
+    else:
+        print_colored(f"❌ Very slow response: {response_time:.0f}ms (risk of missed attestations)", Color.RED)
+        results["issues"].append("Critical: Very slow response")
+    
+    results["ready"] = results["score"] >= 85
+    return results
+
+def check_sepolia_validator_readiness(url):
+    """Check if Sepolia RPC is ready for validator duties"""
+    print_colored("\n🔍 CHECKING SEPOLIA RPC - VALIDATOR READINESS", Color.YELLOW + Color.BOLD)
+    print_colored("-" * 47, Color.YELLOW)
+    
     host, port = parse_url(url)
     if not host:
-        print_colored("❌ Invalid URL format", Colors.RED)
-        return False
+        print_colored("❌ Invalid Sepolia URL format", Color.RED)
+        return {"ready": False, "score": 0}
     
-    # Test connection
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] Testing connection to {host}:{port}...")
+    results = {"ready": False, "score": 0, "issues": []}
     
-    if not test_port(host, port):
-        print_colored(f"❌ Cannot connect to {host}:{port}", Colors.RED)
-        print_colored("   Possible issues:", Colors.YELLOW)
-        print("   • Sepolia node is not running")
-        print("   • Port 8545 is blocked by firewall") 
-        print("   • Wrong IP address or port")
-        return False
+    # Test 1: Connection
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Testing connection to {host}:{port}...")
+    if not test_connection(host, port):
+        print_colored(f"❌ Cannot connect to {host}:{port}", Color.RED)
+        results["issues"].append("Connection failed")
+        return results
     
-    print_colored(f"✅ Port {port} is accessible", Colors.GREEN)
+    print_colored(f"✅ Connection successful", Color.GREEN)
+    results["score"] += 20
     
-    # Test RPC
-    try:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking RPC functionality...")
-        
-        # Check chain ID
-        payload = {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
-        response = requests.post(url, json=payload, timeout=15)
-        
-        if response.status_code == 200:
-            result = response.json()
-            if "result" in result:
-                chain_id = int(result["result"], 16)
-                if chain_id == 11155111:
-                    print_colored("✅ Confirmed Sepolia testnet (Chain ID: 11155111)", Colors.GREEN)
-                else:
-                    print_colored(f"⚠️  Unexpected chain ID: {chain_id}", Colors.YELLOW)
-                    print_colored("   Expected: 11155111 (Sepolia)", Colors.YELLOW)
-            else:
-                print_colored("⚠️  Unexpected RPC response format", Colors.YELLOW)
+    # Test 2: RPC Functionality
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Testing RPC functionality...")
+    payload = {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
+    status_code, response = http_request(url, payload)
+    
+    if status_code == 200 and response and "result" in response:
+        chain_id = int(response["result"], 16)
+        if chain_id == 11155111:
+            print_colored("✅ Confirmed Sepolia testnet", Color.GREEN)
+            results["score"] += 25
         else:
-            print_colored(f"❌ RPC request failed (HTTP {response.status_code})", Colors.RED)
-            return False
-        
-        # Check latest block
-        try:
-            payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-            block_response = requests.post(url, json=payload, timeout=15)
-            if block_response.status_code == 200:
-                block_result = block_response.json()
-                if "result" in block_result:
-                    latest_block = int(block_result["result"], 16)
-                    print_colored(f"✅ Latest block: {latest_block:,}", Colors.GREEN)
-                    
-                    # Check if blocks are recent (basic sync check)
-                    if latest_block > 1000000:  # Reasonable block number for Sepolia
-                        print_colored("✅ Node appears to be synced", Colors.GREEN)
-                    else:
-                        print_colored("⚠️  Block number seems low - node might be syncing", Colors.YELLOW)
-        except:
-            print_colored("⚠️  Could not check latest block", Colors.YELLOW)
-        
-        # Check peer count
-        try:
-            payload = {"jsonrpc": "2.0", "method": "net_peerCount", "params": [], "id": 1}
-            peers_response = requests.post(url, json=payload, timeout=15)
-            if peers_response.status_code == 200:
-                peers_result = peers_response.json()
-                if "result" in peers_result:
-                    peer_count = int(peers_result["result"], 16)
-                    if peer_count > 0:
-                        print_colored(f"✅ Connected to {peer_count} peers", Colors.GREEN)
-                    else:
-                        print_colored("⚠️  No peers connected", Colors.YELLOW)
-        except:
-            print_colored("⚠️  Could not check peer count", Colors.YELLOW)
-        
-        return True
-        
-    except requests.exceptions.Timeout:
-        print_colored("❌ Request timeout - RPC node is too slow to respond", Colors.RED)
-        return False
-    except requests.exceptions.ConnectionError:
-        print_colored("❌ Connection failed - RPC not accessible", Colors.RED)
-        return False
-    except Exception as e:
-        print_colored(f"❌ Error: {str(e)}", Colors.RED)
-        return False
+            print_colored(f"⚠️  Unexpected chain ID: {chain_id}", Color.YELLOW)
+            results["score"] += 10
+    else:
+        print_colored("❌ RPC not responding correctly", Color.RED)
+        results["issues"].append("RPC failed")
+        return results
+    
+    # Test 3: Sync Status
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking sync status...")
+    payload = {"jsonrpc": "2.0", "method": "eth_syncing", "params": [], "id": 1}
+    status_code, response = http_request(url, payload)
+    
+    if status_code == 200 and response and "result" in response:
+        sync_result = response["result"]
+        if sync_result is False:
+            print_colored("✅ Node is fully synced", Color.GREEN)
+            results["score"] += 30
+        else:
+            print_colored("❌ Node is syncing - not ready for validator", Color.RED)
+            results["issues"].append("Still syncing")
+            return results
+    
+    # Test 4: Latest Block Check
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Checking latest block...")
+    payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
+    status_code, response = http_request(url, payload)
+    
+    if status_code == 200 and response and "result" in response:
+        latest_block = int(response["result"], 16)
+        print_colored(f"✅ Latest block: {latest_block:,}", Color.GREEN)
+        results["score"] += 15
+    
+    # Test 5: Response Time Test
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Testing response speed...")
+    start_time = time.time()
+    payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
+    status_code, response = http_request(url, payload)
+    response_time = (time.time() - start_time) * 1000
+    
+    if response_time < 300:
+        print_colored(f"✅ Excellent response time: {response_time:.0f}ms", Color.GREEN)
+        results["score"] += 10
+    elif response_time < 1000:
+        print_colored(f"✅ Good response time: {response_time:.0f}ms", Color.GREEN)
+        results["score"] += 5
+    else:
+        print_colored(f"⚠️  Slow response: {response_time:.0f}ms", Color.YELLOW)
+        results["issues"].append("Slow RPC response")
+    
+    results["ready"] = results["score"] >= 85
+    return results
 
-def print_summary(beacon_ok, sepolia_ok):
-    """Print final summary"""
-    print_colored("\n📊 FINAL HEALTH SUMMARY", Colors.BLUE + Colors.BOLD)
-    print_colored("="*50, Colors.BLUE)
+def print_validator_assessment(beacon_results, sepolia_results):
+    """Print final validator readiness assessment"""
+    print_colored("\n🎯 VALIDATOR READINESS ASSESSMENT", Color.BLUE + Color.BOLD)
+    print_colored("="*60, Color.BLUE)
     
-    # Overall status
-    if beacon_ok and sepolia_ok:
-        print_colored("🎉 ALL SYSTEMS HEALTHY!", Colors.GREEN + Colors.BOLD)
-        print_colored("   ✅ Beacon Chain: Working perfectly", Colors.GREEN)
-        print_colored("   ✅ Sepolia RPC: Working perfectly", Colors.GREEN)
-        print()
-        print_colored("Your nodes are ready for use! 🚀", Colors.GREEN)
+    beacon_score = beacon_results.get("score", 0)
+    sepolia_score = sepolia_results.get("score", 0)
+    overall_score = (beacon_score + sepolia_score) / 2
+    
+    print()
+    print_colored("📊 READINESS SCORES:", Color.CYAN + Color.BOLD)
+    print(f"   Beacon Chain: {beacon_score}/100")
+    print(f"   Sepolia RPC:  {sepolia_score}/100")
+    print(f"   Overall:      {overall_score:.0f}/100")
+    print()
+    
+    # Overall Assessment
+    if overall_score >= 90:
+        print_colored("🟢 EXCELLENT - READY FOR VALIDATOR DUTIES", Color.GREEN + Color.BOLD)
+        print_colored("   Your nodes are highly reliable for validator operations", Color.GREEN)
+        print_colored("   ✅ Low risk of missed attestations", Color.GREEN)
+        print_colored("   ✅ Excellent performance for validator rewards", Color.GREEN)
         
-    elif beacon_ok or sepolia_ok:
-        print_colored("⚠️  PARTIAL SUCCESS", Colors.YELLOW + Colors.BOLD)
-        if beacon_ok:
-            print_colored("   ✅ Beacon Chain: Working", Colors.GREEN)
-        else:
-            print_colored("   ❌ Beacon Chain: Issues detected", Colors.RED)
+    elif overall_score >= 75:
+        print_colored("🟡 GOOD - SUITABLE FOR VALIDATOR WITH MINOR RISKS", Color.YELLOW + Color.BOLD)
+        print_colored("   Your nodes should work well for validators", Color.YELLOW)
+        print_colored("   ⚠️  Monitor performance closely", Color.YELLOW)
         
-        if sepolia_ok:
-            print_colored("   ✅ Sepolia RPC: Working", Colors.GREEN)
-        else:
-            print_colored("   ❌ Sepolia RPC: Issues detected", Colors.RED)
-        
-        print()
-        print_colored("Some nodes need attention. Check the details above.", Colors.YELLOW)
+    elif overall_score >= 60:
+        print_colored("🟠 MARGINAL - HIGH RISK FOR VALIDATOR", Color.YELLOW + Color.BOLD)
+        print_colored("   Your nodes may cause missed attestations", Color.YELLOW)
+        print_colored("   ⚠️  Fix issues before running validator", Color.YELLOW)
         
     else:
-        print_colored("❌ ISSUES DETECTED", Colors.RED + Colors.BOLD)
-        print_colored("   ❌ Beacon Chain: Not working", Colors.RED)
-        print_colored("   ❌ Sepolia RPC: Not working", Colors.RED)
-        print()
-        print_colored("Both nodes need attention. Check the troubleshooting tips above.", Colors.RED)
+        print_colored("🔴 NOT READY - DO NOT RUN VALIDATOR", Color.RED + Color.BOLD)
+        print_colored("   Your nodes will likely cause significant penalties", Color.RED)
+        print_colored("   ❌ Fix all issues before considering validator duties", Color.RED)
     
-    print_colored("="*50, Colors.BLUE)
-
-def print_troubleshooting():
-    """Print troubleshooting tips"""
-    print_colored("\n🔧 COMMON TROUBLESHOOTING TIPS", Colors.YELLOW + Colors.BOLD)
-    print_colored("-" * 35, Colors.YELLOW)
     print()
-    print_colored("If nodes are not working:", Colors.WHITE)
-    print("1. Check if services are running:")
-    print("   sudo systemctl status beacon-node")
-    print("   sudo systemctl status geth")
-    print()
-    print("2. Check if ports are open:")
-    print("   sudo ufw allow 5052  # Beacon")
-    print("   sudo ufw allow 8545  # Sepolia")
-    print()
-    print("3. Check node configuration allows external access:")
-    print("   Beacon: --http-address 0.0.0.0")
-    print("   Geth: --http.addr 0.0.0.0")
-    print()
-    print("4. Check logs for errors:")
-    print("   journalctl -u beacon-node -f")
-    print("   journalctl -u geth -f")
+    
+    # Specific Issues
+    all_issues = beacon_results.get("issues", []) + sepolia_results.get("issues", [])
+    if all_issues:
+        print_colored("⚠️  ISSUES TO FIX:", Color.YELLOW + Color.BOLD)
+        for issue in all_issues:
+            print(f"   • {issue}")
+        print()
+    
+    # Validator-specific recommendations
+    print_colored("💡 VALIDATOR RECOMMENDATIONS:", Color.CYAN + Color.BOLD)
+    
+    if beacon_score < 85:
+        print("   🔧 Beacon Chain:")
+        print("      • Ensure node is fully synced before running validator")
+        print("      • Maintain at least 20+ peers (50+ recommended)")
+        print("      • Monitor response times < 500ms")
+        print("      • Set up monitoring and alerts")
+    
+    if sepolia_score < 85:
+        print("   🔧 Sepolia RPC:")
+        print("      • Ensure RPC is fully synced")
+        print("      • Optimize RPC response times")
+        print("      • Consider using backup RPC endpoints")
+    
+    print("   📈 General:")
+    print("      • Set up redundant connections")
+    print("      • Monitor both nodes 24/7")
+    print("      • Have backup plans for emergencies")
+    print("      • Test during low-stakes periods first")
+    
+    print_colored("\n" + "="*60, Color.BLUE)
+    
+    return overall_score >= 75
 
 def main():
-    """Main function"""
+    """Main execution function"""
     try:
-        # Print header
         print_header()
         
         # Get user input
         beacon_url, sepolia_url = get_user_input()
         
-        # Start health checks
-        print_colored("\n🚀 Starting health checks...", Colors.BLUE + Colors.BOLD)
+        print_colored("\n🚀 Starting validator readiness assessment...", Color.BLUE + Color.BOLD)
         
-        # Check both nodes
-        beacon_ok = check_beacon_node(beacon_url)
-        sepolia_ok = check_sepolia_rpc(sepolia_url)
+        # Run comprehensive checks
+        beacon_results = check_beacon_validator_readiness(beacon_url)
+        sepolia_results = check_sepolia_validator_readiness(sepolia_url)
         
-        # Print summary
-        print_summary(beacon_ok, sepolia_ok)
-        
-        # Print troubleshooting if there are issues
-        if not beacon_ok or not sepolia_ok:
-            print_troubleshooting()
+        # Print assessment
+        validator_ready = print_validator_assessment(beacon_results, sepolia_results)
         
         # Exit with appropriate code
-        if beacon_ok and sepolia_ok:
-            sys.exit(0)
-        else:
-            sys.exit(1)
-            
+        sys.exit(0 if validator_ready else 1)
+        
     except KeyboardInterrupt:
-        print_colored("\n\n⚠️  Health check cancelled by user", Colors.YELLOW)
+        print_colored("\n\n⚠️  Assessment cancelled by user", Color.YELLOW)
         sys.exit(1)
     except Exception as e:
-        print_colored(f"\n❌ Unexpected error: {str(e)}", Colors.RED)
+        print_colored(f"\n❌ Unexpected error: {str(e)}", Color.RED)
         sys.exit(1)
 
 if __name__ == "__main__":
