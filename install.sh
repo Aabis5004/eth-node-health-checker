@@ -1,51 +1,65 @@
-#!/usr/bin/env python3
-"""
-Simple Ethereum Node Health Checker
-Asks for RPC URLs and shows validator readiness
-Based on the working version, simplified for direct user input
-"""
+#!/bin/bash
 
+# Simple Ethereum Validator Readiness Checker
+# Downloads and runs immediately - no installation needed
+
+echo "🚀 Ethereum Validator Readiness Checker"
+echo "========================================"
+
+# Check Python 3
+if ! command -v python3 &> /dev/null; then
+    echo "❌ Python 3 required. Install with:"
+    echo "   sudo apt install python3"
+    exit 1
+fi
+
+# Check requests
+if ! python3 -c "import requests" 2>/dev/null; then
+    echo "📦 Installing requests..."
+    pip3 install --user requests || pip3 install --user --break-system-packages requests || {
+        echo "❌ Could not install requests. Install manually:"
+        echo "   pip3 install requests"
+        exit 1
+    }
+fi
+
+echo "✅ Requirements met"
+echo ""
+
+# Download and run checker
+echo "📥 Running validator readiness checker..."
+TEMP_FILE="/tmp/validator_check_$(date +%s).py"
+
+# Create the checker script directly (embedded)
+cat > "$TEMP_FILE" << 'EOF'
+#!/usr/bin/env python3
 import requests
 import socket
 import sys
 import time
 from datetime import datetime
 
-# Simple colors (no dependencies)
-def print_green(text):
-    print(f"\033[92m{text}\033[0m")
-
-def print_red(text):
-    print(f"\033[91m{text}\033[0m")
-
-def print_yellow(text):
-    print(f"\033[93m{text}\033[0m")
-
-def print_blue(text):
-    print(f"\033[94m{text}\033[0m")
-
-def print_cyan(text):
-    print(f"\033[96m{text}\033[0m")
+def print_green(text): print(f"\033[92m{text}\033[0m")
+def print_red(text): print(f"\033[91m{text}\033[0m")
+def print_yellow(text): print(f"\033[93m{text}\033[0m")
+def print_blue(text): print(f"\033[94m{text}\033[0m")
+def print_cyan(text): print(f"\033[96m{text}\033[0m")
 
 def print_header():
-    """Print header"""
     print_blue("\n" + "="*60)
     print_cyan("🚀 ETHEREUM VALIDATOR READINESS CHECKER")
     print("Check if your nodes are ready for validator duties")
     print_blue("="*60)
 
 def get_user_rpcs():
-    """Get RPC URLs from user"""
     print_yellow("\n📝 Enter your node RPC URLs:")
     print()
-    
     print_cyan("🔗 Beacon Chain RPC:")
     print("   Examples: http://localhost:5052, http://192.168.1.100:5052")
     beacon_url = input("   Beacon URL: ").strip()
     if not beacon_url:
         beacon_url = "http://localhost:5052"
         print_yellow(f"   Using default: {beacon_url}")
-    
     print()
     print_cyan("🔗 Sepolia RPC:")
     print("   Examples: http://localhost:8545, http://192.168.1.100:8545")
@@ -53,11 +67,9 @@ def get_user_rpcs():
     if not sepolia_url:
         sepolia_url = "http://localhost:8545"
         print_yellow(f"   Using default: {sepolia_url}")
-    
     return beacon_url, sepolia_url
 
 def test_port(host, port, timeout=10):
-    """Test if port is open"""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -68,7 +80,6 @@ def test_port(host, port, timeout=10):
         return False
 
 def parse_url(url):
-    """Parse URL to get host and port"""
     try:
         if "://" in url:
             protocol, rest = url.split("://", 1)
@@ -90,7 +101,6 @@ def parse_url(url):
         return None, None
 
 def log_result(message, status="info"):
-    """Log result with timestamp"""
     timestamp = datetime.now().strftime("%H:%M:%S")
     if status == "success":
         print_green(f"[{timestamp}] ✅ {message}")
@@ -102,7 +112,6 @@ def log_result(message, status="info"):
         print_blue(f"[{timestamp}] ℹ️ {message}")
 
 def check_beacon_validator_ready(url):
-    """Check if Beacon node is ready for validator"""
     print_yellow("\n🔍 CHECKING BEACON CHAIN NODE")
     print_yellow("-" * 30)
     
@@ -112,8 +121,6 @@ def check_beacon_validator_ready(url):
         return False, 0
     
     score = 0
-    
-    # Test connection
     log_result(f"Testing connection to {host}:{port}...")
     if not test_port(host, port):
         log_result(f"Cannot connect to {host}:{port}", "error")
@@ -124,7 +131,6 @@ def check_beacon_validator_ready(url):
     score += 20
     
     try:
-        # Test node health
         log_result("Checking node health...")
         response = requests.get(f"{url}/eth/v1/node/health", timeout=15)
         if response.status_code == 200:
@@ -134,7 +140,6 @@ def check_beacon_validator_ready(url):
             log_result(f"Health check failed (HTTP {response.status_code})", "error")
             return False, score
         
-        # Test sync status (CRITICAL for validators)
         log_result("Checking sync status...")
         response = requests.get(f"{url}/eth/v1/node/syncing", timeout=15)
         if response.status_code == 200:
@@ -147,7 +152,6 @@ def check_beacon_validator_ready(url):
                 log_result("Node is SYNCING - NOT ready for validator", "error")
                 return False, score
         
-        # Test peers (important for attestations)
         log_result("Checking peer connections...")
         response = requests.get(f"{url}/eth/v1/node/peers", timeout=15)
         if response.status_code == 200:
@@ -165,7 +169,6 @@ def check_beacon_validator_ready(url):
             else:
                 log_result(f"Very low peers: {peer_count} (dangerous for validators)", "error")
         
-        # Test response time (critical for attestations)
         log_result("Testing response speed...")
         start_time = time.time()
         response = requests.get(f"{url}/eth/v1/beacon/headers/head", timeout=15)
@@ -187,7 +190,6 @@ def check_beacon_validator_ready(url):
         return False, score
 
 def check_sepolia_validator_ready(url):
-    """Check if Sepolia RPC is ready for validator"""
     print_yellow("\n🔍 CHECKING SEPOLIA RPC NODE")
     print_yellow("-" * 27)
     
@@ -197,8 +199,6 @@ def check_sepolia_validator_ready(url):
         return False, 0
     
     score = 0
-    
-    # Test connection
     log_result(f"Testing connection to {host}:{port}...")
     if not test_port(host, port):
         log_result(f"Cannot connect to {host}:{port}", "error")
@@ -209,7 +209,6 @@ def check_sepolia_validator_ready(url):
     score += 20
     
     try:
-        # Test RPC functionality
         log_result("Testing RPC functionality...")
         payload = {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
         response = requests.post(url, json=payload, timeout=15)
@@ -228,7 +227,6 @@ def check_sepolia_validator_ready(url):
             log_result("RPC request failed", "error")
             return False, score
         
-        # Test sync status
         log_result("Checking sync status...")
         payload = {"jsonrpc": "2.0", "method": "eth_syncing", "params": [], "id": 1}
         response = requests.post(url, json=payload, timeout=15)
@@ -244,7 +242,6 @@ def check_sepolia_validator_ready(url):
                     log_result("Node is SYNCING - not ready for validator", "error")
                     return False, score
         
-        # Test latest block
         log_result("Checking latest block...")
         payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
         response = requests.post(url, json=payload, timeout=15)
@@ -256,7 +253,6 @@ def check_sepolia_validator_ready(url):
                 log_result(f"Latest block: {latest_block:,}", "success")
                 score += 15
         
-        # Test response speed
         log_result("Testing response speed...")
         start_time = time.time()
         payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
@@ -279,7 +275,6 @@ def check_sepolia_validator_ready(url):
         return False, score
 
 def print_validator_summary(beacon_ok, beacon_score, sepolia_ok, sepolia_score):
-    """Print validator readiness summary"""
     print_blue("\n🎯 VALIDATOR READINESS ASSESSMENT")
     print_blue("="*50)
     
@@ -292,7 +287,6 @@ def print_validator_summary(beacon_ok, beacon_score, sepolia_ok, sepolia_score):
     print(f"   Overall:      {overall_score:.0f}/100")
     print()
     
-    # Validator readiness assessment
     if beacon_ok and sepolia_ok and overall_score >= 85:
         print_green("🟢 EXCELLENT - READY FOR VALIDATOR DUTIES")
         print_green("   Your nodes are reliable for validator operations")
@@ -319,31 +313,17 @@ def print_validator_summary(beacon_ok, beacon_score, sepolia_ok, sepolia_score):
     print("   • Have backup node connections ready")
     
     print_blue("="*50)
-    
     return validator_ready
 
 def main():
-    """Main function"""
     try:
         print_header()
-        
-        # Get RPC URLs from user
         beacon_url, sepolia_url = get_user_rpcs()
-        
         print_blue("\n🚀 Starting validator readiness check...")
-        
-        # Check beacon node
         beacon_ok, beacon_score = check_beacon_validator_ready(beacon_url)
-        
-        # Check sepolia node
         sepolia_ok, sepolia_score = check_sepolia_validator_ready(sepolia_url)
-        
-        # Print summary
         validator_ready = print_validator_summary(beacon_ok, beacon_score, sepolia_ok, sepolia_score)
-        
-        # Exit with appropriate code
         sys.exit(0 if validator_ready else 1)
-        
     except KeyboardInterrupt:
         print_yellow("\n\n⚠️ Check cancelled by user")
         sys.exit(1)
@@ -353,3 +333,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+EOF
+
+# Run the checker
+python3 "$TEMP_FILE"
+exit_code=$?
+
+# Clean up
+rm -f "$TEMP_FILE"
+
+exit $exit_code
