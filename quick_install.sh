@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Simple Ethereum Node Health Checker
+# Ethereum Node Health Checker - Fixed for curl piping
 echo "🚀 Ethereum Node Health Checker"
 echo "================================"
 
@@ -21,9 +21,19 @@ if ! python3 -c "import requests" 2>/dev/null; then
 fi
 
 echo "✅ Ready to check your nodes"
+echo ""
 
-# Download and run the health checker
-python3 -c '
+# Create a temp file for the health checker
+TEMP_FILE="/tmp/eth_health_checker_$$.py"
+
+# Write the health checker to the temp file
+cat > "$TEMP_FILE" << 'PYTHON_SCRIPT_EOF'
+#!/usr/bin/env python3
+"""
+Ethereum Node Health Checker - Interactive Version
+Fixed to work properly when downloaded via curl
+"""
+
 import requests
 import socket
 import sys
@@ -37,15 +47,23 @@ def print_header():
     print("="*60)
 
 def get_rpc_from_user():
+    """Get RPC URLs from user with proper input handling"""
     print("\n📝 Please enter your node RPC endpoints:")
     print()
     
+    # Get Beacon RPC
     print("🔗 BEACON CHAIN RPC:")
     print("   Examples:")
     print("   • http://localhost:5052")
     print("   • http://192.168.1.100:5052")
     print("   • https://beacon.yournode.com")
-    beacon_rpc = input("\n👉 Enter Beacon RPC URL: ").strip()
+    
+    # Use sys.stdin.readline() instead of input() for better compatibility
+    print("\n👉 Enter Beacon RPC URL: ", end="", flush=True)
+    try:
+        beacon_rpc = sys.stdin.readline().strip()
+    except:
+        beacon_rpc = ""
     
     if not beacon_rpc:
         beacon_rpc = "http://localhost:5052"
@@ -53,12 +71,18 @@ def get_rpc_from_user():
     
     print(f"✅ Beacon RPC: {beacon_rpc}")
     
+    # Get Sepolia RPC  
     print("\n🔗 SEPOLIA RPC:")
     print("   Examples:")
     print("   • http://localhost:8545")
     print("   • http://192.168.1.100:8545")
     print("   • https://sepolia.yournode.com")
-    sepolia_rpc = input("\n👉 Enter Sepolia RPC URL: ").strip()
+    
+    print("\n👉 Enter Sepolia RPC URL: ", end="", flush=True)
+    try:
+        sepolia_rpc = sys.stdin.readline().strip()
+    except:
+        sepolia_rpc = ""
     
     if not sepolia_rpc:
         sepolia_rpc = "http://localhost:8545"
@@ -69,28 +93,37 @@ def get_rpc_from_user():
     return beacon_rpc, sepolia_rpc
 
 def test_connection(url):
+    """Test if we can connect to the URL"""
     try:
         if "://" in url:
             parts = url.split("://")[1]
         else:
             parts = url
         
-        if ":" in parts:
+        if ":" in parts and "/" not in parts.split(":")[-1]:
             host = parts.split(":")[0]
             port = int(parts.split(":")[1].split("/")[0])
         else:
             host = parts.split("/")[0]
-            port = 80
+            # Default ports based on URL
+            if "5052" in url:
+                port = 5052
+            elif "8545" in url:
+                port = 8545
+            else:
+                port = 80
         
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
         result = sock.connect_ex((host, port))
         sock.close()
         return result == 0
-    except:
+    except Exception as e:
+        print(f"Connection test error: {e}")
         return False
 
 def check_beacon_health(rpc_url):
+    """Check Beacon Chain node health"""
     print("\n🔍 CHECKING BEACON CHAIN NODE")
     print("-" * 35)
     
@@ -107,6 +140,7 @@ def check_beacon_health(rpc_url):
     score += 20
     
     try:
+        # Check node health
         print("⏳ Checking node health...")
         response = requests.get(f"{rpc_url}/eth/v1/node/health", timeout=10)
         if response.status_code == 200:
@@ -117,6 +151,7 @@ def check_beacon_health(rpc_url):
             issues.append("Health check failed")
             return score, issues
         
+        # Check sync status
         print("⏳ Checking sync status...")
         response = requests.get(f"{rpc_url}/eth/v1/node/syncing", timeout=10)
         if response.status_code == 200:
@@ -130,6 +165,7 @@ def check_beacon_health(rpc_url):
                 issues.append("Still syncing")
                 score += 10
         
+        # Check peers
         print("⏳ Checking peer connections...")
         response = requests.get(f"{rpc_url}/eth/v1/node/peers", timeout=10)
         if response.status_code == 200:
@@ -149,6 +185,7 @@ def check_beacon_health(rpc_url):
                 print(f"❌ Very few peers: {peer_count} (not suitable)")
                 issues.append("Very low peers")
         
+        # Test response time
         print("⏳ Testing response speed...")
         start = time.time()
         response = requests.get(f"{rpc_url}/eth/v1/beacon/headers/head", timeout=10)
@@ -164,6 +201,7 @@ def check_beacon_health(rpc_url):
             print(f"⚠️  Slow response: {response_time:.0f}ms (may affect validator)")
             issues.append("Slow response")
         
+        # Check blob support
         print("⏳ Checking blob support...")
         try:
             response = requests.get(f"{rpc_url}/eth/v1/beacon/blob_sidecars/head", timeout=10)
@@ -185,6 +223,7 @@ def check_beacon_health(rpc_url):
     return score, issues
 
 def check_sepolia_health(rpc_url):
+    """Check Sepolia RPC node health"""
     print("\n🔍 CHECKING SEPOLIA RPC NODE")
     print("-" * 32)
     
@@ -201,6 +240,7 @@ def check_sepolia_health(rpc_url):
     score += 20
     
     try:
+        # Test RPC call
         print("⏳ Testing RPC functionality...")
         payload = {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
         response = requests.post(rpc_url, json=payload, timeout=10)
@@ -221,6 +261,7 @@ def check_sepolia_health(rpc_url):
             issues.append("RPC failed")
             return score, issues
         
+        # Check sync status
         print("⏳ Checking sync status...")
         payload = {"jsonrpc": "2.0", "method": "eth_syncing", "params": [], "id": 1}
         response = requests.post(rpc_url, json=payload, timeout=10)
@@ -237,6 +278,7 @@ def check_sepolia_health(rpc_url):
                     issues.append("Still syncing")
                     score += 10
         
+        # Get latest block
         print("⏳ Checking latest block...")
         payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
         response = requests.post(rpc_url, json=payload, timeout=10)
@@ -248,6 +290,7 @@ def check_sepolia_health(rpc_url):
                 print(f"✅ Latest block: {block_num:,}")
                 score += 15
         
+        # Test response speed
         print("⏳ Testing response speed...")
         start = time.time()
         payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
@@ -271,6 +314,7 @@ def check_sepolia_health(rpc_url):
     return score, issues
 
 def print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_issues):
+    """Print final validator readiness assessment"""
     print("\n🎯 VALIDATOR READINESS ASSESSMENT")
     print("="*50)
     
@@ -283,12 +327,12 @@ def print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_i
     print(f"   Overall:      {total_score:.0f}/100")
     
     print(f"\n🎯 VALIDATOR READINESS:")
-    if total_score >= 85 and len(all_issues) == 0:
+    if total_score >= 85 and len([i for i in all_issues if "syncing" in i.lower()]) == 0:
         print("🟢 EXCELLENT - READY FOR VALIDATOR")
         print("   ✅ Your nodes are ready for validator duties")
         print("   ✅ Low risk of missed attestations")
         ready = True
-    elif total_score >= 70 and "Still syncing" not in str(all_issues):
+    elif total_score >= 70 and len([i for i in all_issues if "syncing" in i.lower()]) == 0:
         print("🟡 GOOD - SUITABLE FOR VALIDATOR")
         print("   ✅ Your nodes should work for validators")
         print("   ⚠️  Monitor performance")
@@ -311,25 +355,31 @@ def print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_i
     
     print(f"\n💡 RECOMMENDATIONS:")
     print("   • Ensure both nodes are fully synced")
-    print("   • Maintain good internet connection")
+    print("   • Maintain good internet connection (stable, fast)")
     print("   • Keep response times under 1 second")
     print("   • Monitor node health regularly")
     print("   • Have backup RPC endpoints ready")
+    print("   • Test your setup before going live with validator")
     
     print("="*50)
     return ready
 
 def main():
+    """Main function"""
     try:
         print_header()
+        
+        # Get RPC URLs from user
         beacon_rpc, sepolia_rpc = get_rpc_from_user()
         
         print("\n🚀 Starting health check...")
         print("   Testing your nodes for validator readiness...")
         
+        # Check both nodes
         beacon_score, beacon_issues = check_beacon_health(beacon_rpc)
         sepolia_score, sepolia_issues = check_sepolia_health(sepolia_rpc)
         
+        # Show final assessment
         ready = print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_issues)
         
         if ready:
@@ -348,4 +398,17 @@ def main():
 
 if __name__ == "__main__":
     main()
-'
+PYTHON_SCRIPT_EOF
+
+# Make the temp file executable
+chmod +x "$TEMP_FILE"
+
+# Run the health checker
+echo "🔍 Starting interactive health checker..."
+python3 "$TEMP_FILE"
+EXIT_CODE=$?
+
+# Clean up the temp file
+rm -f "$TEMP_FILE"
+
+exit $EXIT_CODE
