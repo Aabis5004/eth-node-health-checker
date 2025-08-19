@@ -620,7 +620,7 @@ class EnhancedNodeHealthChecker:
             if not beacon_healthy:
                 print("   Beacon Chain Issues:")
                 print("   • Check if beacon node service is running: sudo systemctl status lighthouse-bn")
-                print("   • Verify port 5052 is open in firewall: sudo ufw allow 5052")
+                print("   • Verify port 3500 is open in firewall: sudo ufw allow 3500")
                 print("   • Ensure beacon node allows external connections (--http-address 0.0.0.0)")
                 print("   • Check beacon node logs: sudo journalctl -u lighthouse-bn -f")
             
