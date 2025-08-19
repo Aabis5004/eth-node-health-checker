@@ -1,414 +1,287 @@
 #!/bin/bash
 
-# Ethereum Node Health Checker - Fixed for curl piping
-echo "🚀 Ethereum Node Health Checker"
-echo "================================"
+# Ethereum Node Health Checker - Easy Install Script
+# One-click installer for Ethereum node health monitoring
 
-# Check Python
-if ! python3 -c "import sys; sys.exit(0)" 2>/dev/null; then
-    echo "❌ Python 3 required"
-    echo "Install: sudo apt install python3"
-    exit 1
-fi
+set -e
 
-# Check requests
-if ! python3 -c "import requests" 2>/dev/null; then
-    echo "📦 Installing requests..."
-    python3 -m pip install --user requests 2>/dev/null || {
-        echo "❌ Please install requests: pip3 install requests"
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Configuration
+SCRIPT_NAME="eth-health-checker"
+INSTALL_DIR="$HOME/.eth-health-checker"
+VERSION="1.0.0"
+
+echo -e "${BLUE}"
+cat << "EOF"
+╔══════════════════════════════════════════════════════════════╗
+║                                                              ║
+║        🚀 ETHEREUM NODE HEALTH CHECKER INSTALLER 🚀          ║
+║                                                              ║
+║   Professional monitoring for your Ethereum infrastructure  ║
+║                                                              ║
+╚══════════════════════════════════════════════════════════════╝
+EOF
+echo -e "${NC}"
+
+print_status() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+print_step() {
+    echo -e "\n${BLUE}[STEP]${NC} $1"
+}
+
+# Check requirements
+check_requirements() {
+    print_step "Checking system requirements..."
+    
+    if command -v python3 &> /dev/null; then
+        print_status "✅ Python 3 found"
+    else
+        print_error "❌ Python 3 required. Install with:"
+        print_error "  Ubuntu/Debian: sudo apt install python3 python3-pip"
+        exit 1
+    fi
+}
+
+# Install dependencies
+install_dependencies() {
+    print_step "Installing dependencies..."
+    pip3 install --user requests colorama tabulate 2>/dev/null || {
+        print_error "Failed to install dependencies"
         exit 1
     }
-fi
+    print_status "✅ Dependencies installed"
+}
 
-echo "✅ Ready to check your nodes"
-echo ""
+# Create installation directory
+create_install_dir() {
+    print_step "Setting up installation..."
+    rm -rf "$INSTALL_DIR" 2>/dev/null || true
+    mkdir -p "$INSTALL_DIR"
+    print_status "✅ Installation directory ready"
+}
 
-# Create a temp file for the health checker
-TEMP_FILE="/tmp/eth_health_checker_$$.py"
+# Download main script from GitHub
+download_script() {
+    print_step "Downloading health checker..."
+    
+    # Get the GitHub raw URL (replace YOUR-USERNAME with actual username)
+    GITHUB_USER=$(echo "$0" | grep -o 'github.com/[^/]*' | cut -d'/' -f2 || echo "YOUR-USERNAME")
+    SCRIPT_URL="https://raw.githubusercontent.com/${GITHUB_USER}/eth-node-health-checker/main/eth_health_check.py"
+    
+    # Try to download from GitHub first
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$SCRIPT_URL" -o "$INSTALL_DIR/eth_health_check.py" 2>/dev/null || create_embedded_script
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$SCRIPT_URL" -O "$INSTALL_DIR/eth_health_check.py" 2>/dev/null || create_embedded_script
+    else
+        create_embedded_script
+    fi
+    
+    chmod +x "$INSTALL_DIR/eth_health_check.py"
+    print_status "✅ Health checker ready"
+}
 
-# Write the health checker to the temp file
-cat > "$TEMP_FILE" << 'PYTHON_SCRIPT_EOF'
+# Embedded script as fallback
+create_embedded_script() {
+    cat > "$INSTALL_DIR/eth_health_check.py" << 'SCRIPT_EOF'
 #!/usr/bin/env python3
-"""
-Ethereum Node Health Checker - Interactive Version
-Fixed to work properly when downloaded via curl
-"""
+"""Ethereum Node Health Checker - Professional monitoring tool"""
 
 import requests
+import json
 import socket
 import sys
-import time
+import argparse
 from datetime import datetime
 
-def print_header():
-    print("\n" + "="*60)
-    print("🚀 ETHEREUM VALIDATOR NODE HEALTH CHECKER")
-    print("Check if your nodes are ready for validator duties")
-    print("="*60)
+try:
+    from colorama import init, Fore, Style
+    init()
+    HAS_COLOR = True
+except ImportError:
+    HAS_COLOR = False
 
-def get_rpc_from_user():
-    """Get RPC URLs from user with proper input handling"""
-    print("\n📝 Please enter your node RPC endpoints:")
-    print()
-    
-    # Get Beacon RPC
-    print("🔗 BEACON CHAIN RPC:")
-    print("   Examples:")
-    print("   • http://localhost:5052")
-    print("   • http://192.168.1.100:5052")
-    print("   • https://beacon.yournode.com")
-    
-    # Use sys.stdin.readline() instead of input() for better compatibility
-    print("\n👉 Enter Beacon RPC URL: ", end="", flush=True)
-    try:
-        beacon_rpc = sys.stdin.readline().strip()
-    except:
-        beacon_rpc = ""
-    
-    if not beacon_rpc:
-        beacon_rpc = "http://localhost:5052"
-        print(f"   Using default: {beacon_rpc}")
-    
-    print(f"✅ Beacon RPC: {beacon_rpc}")
-    
-    # Get Sepolia RPC  
-    print("\n🔗 SEPOLIA RPC:")
-    print("   Examples:")
-    print("   • http://localhost:8545")
-    print("   • http://192.168.1.100:8545")
-    print("   • https://sepolia.yournode.com")
-    
-    print("\n👉 Enter Sepolia RPC URL: ", end="", flush=True)
-    try:
-        sepolia_rpc = sys.stdin.readline().strip()
-    except:
-        sepolia_rpc = ""
-    
-    if not sepolia_rpc:
-        sepolia_rpc = "http://localhost:8545"
-        print(f"   Using default: {sepolia_rpc}")
-    
-    print(f"✅ Sepolia RPC: {sepolia_rpc}")
-    
-    return beacon_rpc, sepolia_rpc
-
-def test_connection(url):
-    """Test if we can connect to the URL"""
-    try:
-        if "://" in url:
-            parts = url.split("://")[1]
-        else:
-            parts = url
+class NodeHealthChecker:
+    def __init__(self, timeout=15):
+        self.timeout = timeout
         
-        if ":" in parts and "/" not in parts.split(":")[-1]:
-            host = parts.split(":")[0]
-            port = int(parts.split(":")[1].split("/")[0])
-        else:
-            host = parts.split("/")[0]
-            # Default ports based on URL
-            if "5052" in url:
-                port = 5052
-            elif "8545" in url:
-                port = 8545
-            else:
-                port = 80
-        
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
-    except Exception as e:
-        print(f"Connection test error: {e}")
-        return False
-
-def check_beacon_health(rpc_url):
-    """Check Beacon Chain node health"""
-    print("\n🔍 CHECKING BEACON CHAIN NODE")
-    print("-" * 35)
+    def colored_print(self, message, color="white"):
+        if not HAS_COLOR:
+            print(message)
+            return
+        colors = {"red": Fore.RED, "green": Fore.GREEN, "yellow": Fore.YELLOW, "blue": Fore.BLUE, "white": Fore.WHITE}
+        print(f"{colors.get(color, Fore.WHITE)}{message}{Style.RESET_ALL}")
     
-    score = 0
-    issues = []
+    def log_result(self, message, status="info"):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        icons = {"success": "✅", "error": "❌", "warning": "⚠️", "info": "ℹ️"}
+        colors = {"success": "green", "error": "red", "warning": "yellow", "info": "blue"}
+        icon = icons.get(status, "•")
+        color = colors.get(status, "white")
+        self.colored_print(f"[{timestamp}] {icon} {message}", color)
     
-    print(f"⏳ Testing connection to {rpc_url}...")
-    if not test_connection(rpc_url):
-        print("❌ Cannot connect to Beacon RPC")
-        print("   Check: Node running? Firewall? Correct URL?")
-        return score, ["Connection failed"]
-    
-    print("✅ Connection successful")
-    score += 20
-    
-    try:
-        # Check node health
-        print("⏳ Checking node health...")
-        response = requests.get(f"{rpc_url}/eth/v1/node/health", timeout=10)
-        if response.status_code == 200:
-            print("✅ Beacon node is healthy")
-            score += 25
-        else:
-            print(f"❌ Health check failed (HTTP {response.status_code})")
-            issues.append("Health check failed")
-            return score, issues
-        
-        # Check sync status
-        print("⏳ Checking sync status...")
-        response = requests.get(f"{rpc_url}/eth/v1/node/syncing", timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            is_syncing = data.get("data", {}).get("is_syncing", True)
-            if not is_syncing:
-                print("✅ Node is FULLY SYNCED - Ready for validator")
-                score += 30
-            else:
-                print("⚠️  Node is SYNCING - Not ready for validator yet")
-                issues.append("Still syncing")
-                score += 10
-        
-        # Check peers
-        print("⏳ Checking peer connections...")
-        response = requests.get(f"{rpc_url}/eth/v1/node/peers", timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            peer_count = len(data.get("data", []))
-            if peer_count >= 30:
-                print(f"✅ Excellent peers: {peer_count} (great for validators)")
-                score += 15
-            elif peer_count >= 10:
-                print(f"✅ Good peers: {peer_count} (sufficient for validators)")
-                score += 10
-            elif peer_count >= 3:
-                print(f"⚠️  Low peers: {peer_count} (risky for validators)")
-                score += 5
-                issues.append("Low peer count")
-            else:
-                print(f"❌ Very few peers: {peer_count} (not suitable)")
-                issues.append("Very low peers")
-        
-        # Test response time
-        print("⏳ Testing response speed...")
-        start = time.time()
-        response = requests.get(f"{rpc_url}/eth/v1/beacon/headers/head", timeout=10)
-        response_time = (time.time() - start) * 1000
-        
-        if response_time < 500:
-            print(f"✅ Fast response: {response_time:.0f}ms (excellent)")
-            score += 10
-        elif response_time < 1500:
-            print(f"✅ Good response: {response_time:.0f}ms (acceptable)")
-            score += 5
-        else:
-            print(f"⚠️  Slow response: {response_time:.0f}ms (may affect validator)")
-            issues.append("Slow response")
-        
-        # Check blob support
-        print("⏳ Checking blob support...")
+    def test_connection(self, host, port):
         try:
-            response = requests.get(f"{rpc_url}/eth/v1/beacon/blob_sidecars/head", timeout=10)
-            if response.status_code == 200:
-                print("✅ Blob support available")
-                score += 5
-            elif response.status_code == 404:
-                print("✅ Blob endpoint available (no blobs in current block)")
-                score += 5
-            else:
-                print("⚠️  Blob support unclear")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            return result == 0
         except:
-            print("⚠️  Could not check blob support")
+            return False
     
-    except Exception as e:
-        print(f"❌ Error checking beacon: {str(e)}")
-        issues.append(f"Check error: {str(e)}")
-    
-    return score, issues
-
-def check_sepolia_health(rpc_url):
-    """Check Sepolia RPC node health"""
-    print("\n🔍 CHECKING SEPOLIA RPC NODE")
-    print("-" * 32)
-    
-    score = 0
-    issues = []
-    
-    print(f"⏳ Testing connection to {rpc_url}...")
-    if not test_connection(rpc_url):
-        print("❌ Cannot connect to Sepolia RPC")
-        print("   Check: Node running? Firewall? Correct URL?")
-        return score, ["Connection failed"]
-    
-    print("✅ Connection successful")
-    score += 20
-    
-    try:
-        # Test RPC call
-        print("⏳ Testing RPC functionality...")
-        payload = {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
-        response = requests.post(rpc_url, json=payload, timeout=10)
+    def check_beacon_node(self, url):
+        self.colored_print("\n📋 BEACON CHAIN NODE", "yellow")
+        self.colored_print("-" * 20, "yellow")
         
-        if response.status_code == 200:
-            data = response.json()
-            if "result" in data:
-                chain_id = int(data["result"], 16)
+        try:
+            if "://" in url:
+                host = url.split("://")[1].split(":")[0]
+                port = int(url.split(":")[-1].split("/")[0])
+            else:
+                host, port = url.split(":") if ":" in url else (url, 5052)
+                port = int(port)
+        except:
+            self.log_result(f"Invalid URL format: {url}", "error")
+            return False
+        
+        if not self.test_connection(host, port):
+            self.log_result(f"Cannot connect to {host}:{port}", "error")
+            return False
+        
+        self.log_result(f"Port {port} is open on {host}", "success")
+        
+        try:
+            response = requests.get(f"{url}/eth/v1/node/health", timeout=self.timeout)
+            if response.status_code == 200:
+                self.log_result("Beacon node is healthy", "success")
+                return True
+            else:
+                self.log_result(f"Beacon node health check failed", "error")
+                return False
+        except Exception as e:
+            self.log_result(f"Beacon node error: {str(e)}", "error")
+            return False
+    
+    def check_sepolia_rpc(self, url):
+        self.colored_print("\n📋 SEPOLIA RPC NODE", "yellow")
+        self.colored_print("-" * 18, "yellow")
+        
+        try:
+            if "://" in url:
+                host = url.split("://")[1].split(":")[0]
+                port = int(url.split(":")[-1].split("/")[0])
+            else:
+                host, port = url.split(":") if ":" in url else (url, 8545)
+                port = int(port)
+        except:
+            self.log_result(f"Invalid URL format: {url}", "error")
+            return False
+        
+        if not self.test_connection(host, port):
+            self.log_result(f"Cannot connect to {host}:{port}", "error")
+            return False
+        
+        self.log_result(f"Port {port} is open on {host}", "success")
+        
+        try:
+            payload = {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
+            response = requests.post(url, json=payload, timeout=self.timeout)
+            if response.status_code == 200:
+                chain_id = int(response.json().get("result", "0x0"), 16)
                 if chain_id == 11155111:
-                    print("✅ Confirmed Sepolia testnet")
-                    score += 25
+                    self.log_result("Confirmed Sepolia testnet", "success")
+                    return True
                 else:
-                    print(f"⚠️  Chain ID: {chain_id} (expected 11155111 for Sepolia)")
-                    score += 15
-                    issues.append(f"Wrong chain: {chain_id}")
-        else:
-            print("❌ RPC call failed")
-            issues.append("RPC failed")
-            return score, issues
-        
-        # Check sync status
-        print("⏳ Checking sync status...")
-        payload = {"jsonrpc": "2.0", "method": "eth_syncing", "params": [], "id": 1}
-        response = requests.post(rpc_url, json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "result" in data:
-                sync_result = data["result"]
-                if sync_result is False:
-                    print("✅ Node is FULLY SYNCED")
-                    score += 30
-                else:
-                    print("⚠️  Node is SYNCING - Not ready for validator")
-                    issues.append("Still syncing")
-                    score += 10
-        
-        # Get latest block
-        print("⏳ Checking latest block...")
-        payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-        response = requests.post(rpc_url, json=payload, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "result" in data:
-                block_num = int(data["result"], 16)
-                print(f"✅ Latest block: {block_num:,}")
-                score += 15
-        
-        # Test response speed
-        print("⏳ Testing response speed...")
-        start = time.time()
-        payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-        response = requests.post(rpc_url, json=payload, timeout=10)
-        response_time = (time.time() - start) * 1000
-        
-        if response_time < 300:
-            print(f"✅ Fast response: {response_time:.0f}ms (excellent)")
-            score += 10
-        elif response_time < 1000:
-            print(f"✅ Good response: {response_time:.0f}ms (acceptable)")
-            score += 5
-        else:
-            print(f"⚠️  Slow response: {response_time:.0f}ms")
-            issues.append("Slow response")
-    
-    except Exception as e:
-        print(f"❌ Error checking Sepolia: {str(e)}")
-        issues.append(f"Check error: {str(e)}")
-    
-    return score, issues
-
-def print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_issues):
-    """Print final validator readiness assessment"""
-    print("\n🎯 VALIDATOR READINESS ASSESSMENT")
-    print("="*50)
-    
-    total_score = (beacon_score + sepolia_score) / 2
-    all_issues = beacon_issues + sepolia_issues
-    
-    print(f"\n📊 SCORES:")
-    print(f"   Beacon Chain: {beacon_score}/100")
-    print(f"   Sepolia RPC:  {sepolia_score}/100")
-    print(f"   Overall:      {total_score:.0f}/100")
-    
-    print(f"\n🎯 VALIDATOR READINESS:")
-    if total_score >= 85 and len([i for i in all_issues if "syncing" in i.lower()]) == 0:
-        print("🟢 EXCELLENT - READY FOR VALIDATOR")
-        print("   ✅ Your nodes are ready for validator duties")
-        print("   ✅ Low risk of missed attestations")
-        ready = True
-    elif total_score >= 70 and len([i for i in all_issues if "syncing" in i.lower()]) == 0:
-        print("🟡 GOOD - SUITABLE FOR VALIDATOR")
-        print("   ✅ Your nodes should work for validators")
-        print("   ⚠️  Monitor performance")
-        ready = True
-    elif total_score >= 50:
-        print("🟠 MARGINAL - RISKY FOR VALIDATOR")
-        print("   ⚠️  Your nodes may cause issues")
-        print("   ⚠️  Fix problems before running validator")
-        ready = False
-    else:
-        print("🔴 NOT READY - DO NOT RUN VALIDATOR")
-        print("   ❌ Your nodes will likely cause missed attestations")
-        print("   ❌ Fix all issues first")
-        ready = False
-    
-    if all_issues:
-        print(f"\n⚠️  ISSUES TO FIX:")
-        for i, issue in enumerate(set(all_issues), 1):
-            print(f"   {i}. {issue}")
-    
-    print(f"\n💡 RECOMMENDATIONS:")
-    print("   • Ensure both nodes are fully synced")
-    print("   • Maintain good internet connection (stable, fast)")
-    print("   • Keep response times under 1 second")
-    print("   • Monitor node health regularly")
-    print("   • Have backup RPC endpoints ready")
-    print("   • Test your setup before going live with validator")
-    
-    print("="*50)
-    return ready
+                    self.log_result(f"Unexpected chain ID: {chain_id}", "warning")
+                    return True
+            else:
+                self.log_result("Sepolia RPC check failed", "error")
+                return False
+        except Exception as e:
+            self.log_result(f"Sepolia RPC error: {str(e)}", "error")
+            return False
 
 def main():
-    """Main function"""
-    try:
-        print_header()
-        
-        # Get RPC URLs from user
-        beacon_rpc, sepolia_rpc = get_rpc_from_user()
-        
-        print("\n🚀 Starting health check...")
-        print("   Testing your nodes for validator readiness...")
-        
-        # Check both nodes
-        beacon_score, beacon_issues = check_beacon_health(beacon_rpc)
-        sepolia_score, sepolia_issues = check_sepolia_health(sepolia_rpc)
-        
-        # Show final assessment
-        ready = print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_issues)
-        
-        if ready:
-            print("\n🎉 Your nodes look good for validator operations!")
-        else:
-            print("\n⚠️  Please fix the issues before running a validator.")
-        
-        sys.exit(0 if ready else 1)
-        
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Health check cancelled")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Error: {str(e)}")
+    parser = argparse.ArgumentParser(description="Ethereum Node Health Checker")
+    parser.add_argument("--beacon", default="http://localhost:5052", help="Beacon node URL")
+    parser.add_argument("--sepolia", default="http://localhost:8545", help="Sepolia RPC URL")
+    parser.add_argument("--timeout", type=int, default=15, help="Timeout in seconds")
+    args = parser.parse_args()
+    
+    checker = NodeHealthChecker(timeout=args.timeout)
+    
+    checker.colored_print("\n" + "="*50, "blue")
+    checker.colored_print("🚀 ETHEREUM NODE HEALTH CHECKER", "blue")
+    checker.colored_print("="*50, "blue")
+    
+    beacon_ok = checker.check_beacon_node(args.beacon)
+    sepolia_ok = checker.check_sepolia_rpc(args.sepolia)
+    
+    checker.colored_print("\n📊 SUMMARY", "blue")
+    checker.colored_print("-" * 10, "blue")
+    
+    if beacon_ok and sepolia_ok:
+        checker.colored_print("🎉 All systems healthy!", "green")
+        sys.exit(0)
+    else:
+        checker.colored_print("⚠️ Issues detected", "yellow")
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
-PYTHON_SCRIPT_EOF
+SCRIPT_EOF
+}
 
-# Make the temp file executable
-chmod +x "$TEMP_FILE"
+# Create wrapper command
+create_wrapper() {
+    print_step "Creating easy command..."
+    
+    cat > "$INSTALL_DIR/check-nodes" << 'WRAPPER_EOF'
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+python3 "$SCRIPT_DIR/eth_health_check.py" "$@"
+WRAPPER_EOF
+    
+    chmod +x "$INSTALL_DIR/check-nodes"
+    
+    # Add to PATH
+    if [[ ":$PATH:" != *":$HOME/.eth-health-checker:"* ]]; then
+        echo 'export PATH="$HOME/.eth-health-checker:$PATH"' >> "$HOME/.bashrc"
+        print_status "✅ Added to PATH"
+    fi
+}
 
-# Run the health checker
-echo "🔍 Starting interactive health checker..."
-python3 "$TEMP_FILE"
-EXIT_CODE=$?
+# Main installation
+main() {
+    check_requirements
+    install_dependencies
+    create_install_dir
+    download_script
+    create_wrapper
+    
+    print_step "Installation Complete! 🎉"
+    echo ""
+    print_status "🎯 QUICK START:"
+    echo "1. Restart your terminal (or run: source ~/.bashrc)"
+    echo "2. Run: check-nodes"
+    echo "3. For remote nodes: check-nodes --beacon http://IP:5052 --sepolia http://IP:8545"
+    echo ""
+    print_status "📁 Installed to: $INSTALL_DIR"
+    echo ""
+    print_status "🚀 Ready to monitor your Ethereum nodes!"
+}
 
-# Clean up the temp file
-rm -f "$TEMP_FILE"
-
-exit $EXIT_CODE
+main "$@"
