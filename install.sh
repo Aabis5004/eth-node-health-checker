@@ -1,484 +1,351 @@
 #!/bin/bash
 
-# Ethereum Validator Readiness Checker
-# Interactive version that asks for RPC URLs
+# Simple Ethereum Node Health Checker
+echo "🚀 Ethereum Node Health Checker"
+echo "================================"
 
-echo "🚀 Ethereum Validator Readiness Checker"
-echo "========================================"
-
-# Check Python 3
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 required. Install with:"
-    echo "   sudo apt install python3"
+# Check Python
+if ! python3 -c "import sys; sys.exit(0)" 2>/dev/null; then
+    echo "❌ Python 3 required"
+    echo "Install: sudo apt install python3"
     exit 1
 fi
 
 # Check requests
 if ! python3 -c "import requests" 2>/dev/null; then
     echo "📦 Installing requests..."
-    pip3 install --user requests || pip3 install --user --break-system-packages requests || {
-        echo "❌ Could not install requests. Install manually:"
-        echo "   pip3 install requests"
+    python3 -m pip install --user requests 2>/dev/null || {
+        echo "❌ Please install requests: pip3 install requests"
         exit 1
     }
 fi
 
-echo "✅ Requirements met"
-echo ""
+echo "✅ Ready to check your nodes"
 
-# Create and run the interactive checker
-TEMP_FILE="/tmp/validator_check_$(date +%s).py"
-
-cat > "$TEMP_FILE" << 'EOF'
-#!/usr/bin/env python3
-"""
-Interactive Ethereum Validator Readiness Checker
-Asks user for RPC URLs and checks validator readiness
-"""
-
+# Download and run the health checker
+python3 -c '
 import requests
 import socket
 import sys
 import time
 from datetime import datetime
 
-# Colors
-def print_green(text): print(f"\033[92m{text}\033[0m")
-def print_red(text): print(f"\033[91m{text}\033[0m")
-def print_yellow(text): print(f"\033[93m{text}\033[0m")
-def print_blue(text): print(f"\033[94m{text}\033[0m")
-def print_cyan(text): print(f"\033[96m{text}\033[0m")
-
 def print_header():
-    print_blue("\n" + "="*65)
-    print_cyan("🔥 ETHEREUM VALIDATOR READINESS CHECKER")
-    print("Check if your nodes can handle validator duties without missing attestations")
-    print_blue("="*65)
+    print("\n" + "="*60)
+    print("🚀 ETHEREUM VALIDATOR NODE HEALTH CHECKER")
+    print("Check if your nodes are ready for validator duties")
+    print("="*60)
 
-def get_user_rpcs():
-    """Interactive function to get RPC URLs from user"""
-    print_yellow("\n📝 ENTER YOUR NODE RPC ENDPOINTS:")
+def get_rpc_from_user():
+    print("\n📝 Please enter your node RPC endpoints:")
     print()
     
-    # Get Beacon Chain RPC
-    print_cyan("🔗 BEACON CHAIN NODE:")
+    print("🔗 BEACON CHAIN RPC:")
     print("   Examples:")
     print("   • http://localhost:5052")
     print("   • http://192.168.1.100:5052")
-    print("   • https://your-beacon-node.com:5052")
-    print()
+    print("   • https://beacon.yournode.com")
+    beacon_rpc = input("\n👉 Enter Beacon RPC URL: ").strip()
     
-    while True:
-        beacon_url = input("👉 Enter your Beacon Chain RPC URL: ").strip()
-        if beacon_url:
-            break
-        elif input("   Use default localhost:5052? (y/n): ").lower().startswith('y'):
-            beacon_url = "http://localhost:5052"
-            break
-        print("   Please enter a valid URL")
+    if not beacon_rpc:
+        beacon_rpc = "http://localhost:5052"
+        print(f"   Using default: {beacon_rpc}")
     
-    print_yellow(f"   ✅ Beacon URL: {beacon_url}")
-    print()
+    print(f"✅ Beacon RPC: {beacon_rpc}")
     
-    # Get Sepolia RPC
-    print_cyan("🔗 SEPOLIA RPC NODE:")
+    print("\n🔗 SEPOLIA RPC:")
     print("   Examples:")
     print("   • http://localhost:8545")
     print("   • http://192.168.1.100:8545")
-    print("   • https://your-sepolia-rpc.com:8545")
-    print()
+    print("   • https://sepolia.yournode.com")
+    sepolia_rpc = input("\n👉 Enter Sepolia RPC URL: ").strip()
     
-    while True:
-        sepolia_url = input("👉 Enter your Sepolia RPC URL: ").strip()
-        if sepolia_url:
-            break
-        elif input("   Use default localhost:8545? (y/n): ").lower().startswith('y'):
-            sepolia_url = "http://localhost:8545"
-            break
-        print("   Please enter a valid URL")
+    if not sepolia_rpc:
+        sepolia_rpc = "http://localhost:8545"
+        print(f"   Using default: {sepolia_rpc}")
     
-    print_yellow(f"   ✅ Sepolia URL: {sepolia_url}")
+    print(f"✅ Sepolia RPC: {sepolia_rpc}")
     
-    return beacon_url, sepolia_url
+    return beacon_rpc, sepolia_rpc
 
-def test_port(host, port, timeout=10):
-    """Test if port is accessible"""
+def test_connection(url):
     try:
+        if "://" in url:
+            parts = url.split("://")[1]
+        else:
+            parts = url
+        
+        if ":" in parts:
+            host = parts.split(":")[0]
+            port = int(parts.split(":")[1].split("/")[0])
+        else:
+            host = parts.split("/")[0]
+            port = 80
+        
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
+        sock.settimeout(5)
         result = sock.connect_ex((host, port))
         sock.close()
         return result == 0
     except:
         return False
 
-def parse_url(url):
-    """Parse URL to extract host and port"""
-    try:
-        if "://" in url:
-            protocol, rest = url.split("://", 1)
-            if ":" in rest and "/" not in rest.split(":")[-1]:
-                host, port_part = rest.rsplit(":", 1)
-                port = int(port_part.split("/")[0])
-            else:
-                host = rest.split("/")[0]
-                port = 443 if protocol == "https" else (5052 if "beacon" in url.lower() else 8545)
-        else:
-            if ":" in url:
-                host, port = url.rsplit(":", 1)
-                port = int(port)
-            else:
-                host = url
-                port = 5052  # default for beacon
-        return host, port
-    except Exception as e:
-        print_red(f"Error parsing URL {url}: {e}")
-        return None, None
-
-def log_result(message, status="info"):
-    """Log result with colored output"""
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    if status == "success":
-        print_green(f"[{timestamp}] ✅ {message}")
-    elif status == "error":
-        print_red(f"[{timestamp}] ❌ {message}")
-    elif status == "warning":
-        print_yellow(f"[{timestamp}] ⚠️ {message}")
-    else:
-        print_blue(f"[{timestamp}] ℹ️ {message}")
-
-def check_beacon_validator_ready(url):
-    """Check if Beacon node is ready for validator duties"""
-    print_yellow("\n🔍 CHECKING BEACON CHAIN - VALIDATOR READINESS")
-    print_yellow("-" * 48)
-    
-    host, port = parse_url(url)
-    if not host:
-        log_result("Invalid Beacon URL format", "error")
-        return False, 0, ["Invalid URL"]
+def check_beacon_health(rpc_url):
+    print("\n🔍 CHECKING BEACON CHAIN NODE")
+    print("-" * 35)
     
     score = 0
     issues = []
     
-    # Connection test
-    log_result(f"Testing connection to {host}:{port}...")
-    if not test_port(host, port):
-        log_result(f"Cannot connect to {host}:{port}", "error")
-        log_result("Possible issues: Node offline, firewall blocking, wrong IP/port", "warning")
-        return False, 0, ["Connection failed"]
+    print(f"⏳ Testing connection to {rpc_url}...")
+    if not test_connection(rpc_url):
+        print("❌ Cannot connect to Beacon RPC")
+        print("   Check: Node running? Firewall? Correct URL?")
+        return score, ["Connection failed"]
     
-    log_result("Connection established successfully", "success")
+    print("✅ Connection successful")
     score += 20
     
     try:
-        # Node health check
-        log_result("Checking beacon node health status...")
-        response = requests.get(f"{url}/eth/v1/node/health", timeout=15)
+        print("⏳ Checking node health...")
+        response = requests.get(f"{rpc_url}/eth/v1/node/health", timeout=10)
         if response.status_code == 200:
-            log_result("Beacon node is healthy and responding", "success")
+            print("✅ Beacon node is healthy")
             score += 25
         else:
-            log_result(f"Health check failed (HTTP {response.status_code})", "error")
-            issues.append("Node health check failed")
-            return False, score, issues
+            print(f"❌ Health check failed (HTTP {response.status_code})")
+            issues.append("Health check failed")
+            return score, issues
         
-        # Sync status check (CRITICAL for validators)
-        log_result("Checking synchronization status...")
-        response = requests.get(f"{url}/eth/v1/node/syncing", timeout=15)
+        print("⏳ Checking sync status...")
+        response = requests.get(f"{rpc_url}/eth/v1/node/syncing", timeout=10)
         if response.status_code == 200:
-            sync_data = response.json()
-            is_syncing = sync_data.get("data", {}).get("is_syncing", True)
+            data = response.json()
+            is_syncing = data.get("data", {}).get("is_syncing", True)
             if not is_syncing:
-                log_result("✓ Node is FULLY SYNCED - Ready for validator duties", "success")
-                score += 35
+                print("✅ Node is FULLY SYNCED - Ready for validator")
+                score += 30
             else:
-                log_result("✗ Node is SYNCING - NOT ready for validator", "error")
-                issues.append("Node still syncing")
-                return False, score, issues
-        else:
-            log_result("Could not check sync status", "warning")
-            issues.append("Sync status unknown")
+                print("⚠️  Node is SYNCING - Not ready for validator yet")
+                issues.append("Still syncing")
+                score += 10
         
-        # Peer connectivity check
-        log_result("Checking peer connections...")
-        response = requests.get(f"{url}/eth/v1/node/peers", timeout=15)
+        print("⏳ Checking peer connections...")
+        response = requests.get(f"{rpc_url}/eth/v1/node/peers", timeout=10)
         if response.status_code == 200:
-            peers_data = response.json()
-            peer_count = len(peers_data.get("data", []))
-            if peer_count >= 50:
-                log_result(f"Excellent peer count: {peer_count} peers (optimal)", "success")
+            data = response.json()
+            peer_count = len(data.get("data", []))
+            if peer_count >= 30:
+                print(f"✅ Excellent peers: {peer_count} (great for validators)")
                 score += 15
-            elif peer_count >= 25:
-                log_result(f"Good peer count: {peer_count} peers (sufficient)", "success")
-                score += 12
             elif peer_count >= 10:
-                log_result(f"Adequate peer count: {peer_count} peers (minimum)", "warning")
-                score += 8
+                print(f"✅ Good peers: {peer_count} (sufficient for validators)")
+                score += 10
+            elif peer_count >= 3:
+                print(f"⚠️  Low peers: {peer_count} (risky for validators)")
+                score += 5
                 issues.append("Low peer count")
             else:
-                log_result(f"Poor peer count: {peer_count} peers (risky for validators)", "error")
-                score += 3
-                issues.append("Very low peer count")
+                print(f"❌ Very few peers: {peer_count} (not suitable)")
+                issues.append("Very low peers")
         
-        # Response time test (critical for attestations)
-        log_result("Testing response time for validator operations...")
-        start_time = time.time()
-        response = requests.get(f"{url}/eth/v1/beacon/headers/head", timeout=15)
-        response_time = (time.time() - start_time) * 1000
+        print("⏳ Testing response speed...")
+        start = time.time()
+        response = requests.get(f"{rpc_url}/eth/v1/beacon/headers/head", timeout=10)
+        response_time = (time.time() - start) * 1000
         
-        if response_time < 300:
-            log_result(f"Excellent response time: {response_time:.0f}ms (optimal for validators)", "success")
+        if response_time < 500:
+            print(f"✅ Fast response: {response_time:.0f}ms (excellent)")
+            score += 10
+        elif response_time < 1500:
+            print(f"✅ Good response: {response_time:.0f}ms (acceptable)")
             score += 5
-        elif response_time < 800:
-            log_result(f"Good response time: {response_time:.0f}ms (acceptable)", "success")
-            score += 3
-        elif response_time < 2000:
-            log_result(f"Slow response time: {response_time:.0f}ms (may affect performance)", "warning")
-            score += 1
-            issues.append("Slow response time")
         else:
-            log_result(f"Very slow response: {response_time:.0f}ms (risk of missed attestations)", "error")
-            issues.append("Very slow response time")
+            print(f"⚠️  Slow response: {response_time:.0f}ms (may affect validator)")
+            issues.append("Slow response")
         
-        return True, score, issues
-        
-    except Exception as e:
-        log_result(f"Error during beacon checks: {str(e)}", "error")
-        return False, score, issues + [f"Check error: {str(e)}"]
-
-def check_sepolia_validator_ready(url):
-    """Check if Sepolia RPC is ready for validator support"""
-    print_yellow("\n🔍 CHECKING SEPOLIA RPC - VALIDATOR SUPPORT")
-    print_yellow("-" * 42)
+        print("⏳ Checking blob support...")
+        try:
+            response = requests.get(f"{rpc_url}/eth/v1/beacon/blob_sidecars/head", timeout=10)
+            if response.status_code == 200:
+                print("✅ Blob support available")
+                score += 5
+            elif response.status_code == 404:
+                print("✅ Blob endpoint available (no blobs in current block)")
+                score += 5
+            else:
+                print("⚠️  Blob support unclear")
+        except:
+            print("⚠️  Could not check blob support")
     
-    host, port = parse_url(url)
-    if not host:
-        log_result("Invalid Sepolia URL format", "error")
-        return False, 0, ["Invalid URL"]
+    except Exception as e:
+        print(f"❌ Error checking beacon: {str(e)}")
+        issues.append(f"Check error: {str(e)}")
+    
+    return score, issues
+
+def check_sepolia_health(rpc_url):
+    print("\n🔍 CHECKING SEPOLIA RPC NODE")
+    print("-" * 32)
     
     score = 0
     issues = []
     
-    # Connection test
-    log_result(f"Testing connection to {host}:{port}...")
-    if not test_port(host, port):
-        log_result(f"Cannot connect to {host}:{port}", "error")
-        log_result("Possible issues: Node offline, firewall blocking, wrong IP/port", "warning")
-        return False, 0, ["Connection failed"]
+    print(f"⏳ Testing connection to {rpc_url}...")
+    if not test_connection(rpc_url):
+        print("❌ Cannot connect to Sepolia RPC")
+        print("   Check: Node running? Firewall? Correct URL?")
+        return score, ["Connection failed"]
     
-    log_result("Connection established successfully", "success")
+    print("✅ Connection successful")
     score += 20
     
     try:
-        # RPC functionality test
-        log_result("Testing RPC functionality...")
+        print("⏳ Testing RPC functionality...")
         payload = {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 1}
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(rpc_url, json=payload, timeout=10)
         
         if response.status_code == 200:
-            result = response.json()
-            if "result" in result:
-                chain_id = int(result["result"], 16)
+            data = response.json()
+            if "result" in data:
+                chain_id = int(data["result"], 16)
                 if chain_id == 11155111:
-                    log_result("✓ Confirmed Sepolia testnet (Chain ID: 11155111)", "success")
+                    print("✅ Confirmed Sepolia testnet")
                     score += 25
                 else:
-                    log_result(f"Unexpected chain ID: {chain_id} (expected: 11155111)", "warning")
+                    print(f"⚠️  Chain ID: {chain_id} (expected 11155111 for Sepolia)")
                     score += 15
-                    issues.append(f"Wrong chain ID: {chain_id}")
-            else:
-                log_result("Invalid RPC response format", "error")
-                issues.append("Invalid RPC response")
+                    issues.append(f"Wrong chain: {chain_id}")
         else:
-            log_result(f"RPC request failed (HTTP {response.status_code})", "error")
-            issues.append("RPC request failed")
-            return False, score, issues
+            print("❌ RPC call failed")
+            issues.append("RPC failed")
+            return score, issues
         
-        # Sync status check
-        log_result("Checking synchronization status...")
+        print("⏳ Checking sync status...")
         payload = {"jsonrpc": "2.0", "method": "eth_syncing", "params": [], "id": 1}
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(rpc_url, json=payload, timeout=10)
         
         if response.status_code == 200:
-            result = response.json()
-            if "result" in result:
-                sync_result = result["result"]
+            data = response.json()
+            if "result" in data:
+                sync_result = data["result"]
                 if sync_result is False:
-                    log_result("✓ Node is FULLY SYNCED", "success")
+                    print("✅ Node is FULLY SYNCED")
                     score += 30
                 else:
-                    log_result("✗ Node is SYNCING - not ready for validator", "error")
-                    issues.append("Node still syncing")
-                    return False, score, issues
+                    print("⚠️  Node is SYNCING - Not ready for validator")
+                    issues.append("Still syncing")
+                    score += 10
         
-        # Latest block check
-        log_result("Checking latest block information...")
+        print("⏳ Checking latest block...")
         payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(rpc_url, json=payload, timeout=10)
         
         if response.status_code == 200:
-            result = response.json()
-            if "result" in result:
-                latest_block = int(result["result"], 16)
-                log_result(f"Latest block: {latest_block:,}", "success")
+            data = response.json()
+            if "result" in data:
+                block_num = int(data["result"], 16)
+                print(f"✅ Latest block: {block_num:,}")
                 score += 15
-                
-                # Check if block number seems reasonable
-                if latest_block > 1000000:
-                    log_result("Block height appears current", "success")
-                else:
-                    log_result("Block height seems low - node may be syncing", "warning")
-                    issues.append("Low block height")
         
-        # Response speed test
-        log_result("Testing RPC response speed...")
-        start_time = time.time()
+        print("⏳ Testing response speed...")
+        start = time.time()
         payload = {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1}
-        response = requests.post(url, json=payload, timeout=15)
-        response_time = (time.time() - start_time) * 1000
+        response = requests.post(rpc_url, json=payload, timeout=10)
+        response_time = (time.time() - start) * 1000
         
-        if response_time < 200:
-            log_result(f"Excellent response time: {response_time:.0f}ms", "success")
+        if response_time < 300:
+            print(f"✅ Fast response: {response_time:.0f}ms (excellent)")
             score += 10
-        elif response_time < 500:
-            log_result(f"Good response time: {response_time:.0f}ms", "success")
-            score += 7
-        elif response_time < 1500:
-            log_result(f"Acceptable response time: {response_time:.0f}ms", "warning")
-            score += 4
-            issues.append("Slow RPC response")
+        elif response_time < 1000:
+            print(f"✅ Good response: {response_time:.0f}ms (acceptable)")
+            score += 5
         else:
-            log_result(f"Slow response time: {response_time:.0f}ms", "error")
-            issues.append("Very slow RPC response")
-        
-        return True, score, issues
-        
-    except Exception as e:
-        log_result(f"Error during Sepolia checks: {str(e)}", "error")
-        return False, score, issues + [f"Check error: {str(e)}"]
-
-def print_validator_assessment(beacon_ok, beacon_score, beacon_issues, sepolia_ok, sepolia_score, sepolia_issues):
-    """Print comprehensive validator readiness assessment"""
-    print_blue("\n🎯 VALIDATOR READINESS ASSESSMENT")
-    print_blue("="*65)
+            print(f"⚠️  Slow response: {response_time:.0f}ms")
+            issues.append("Slow response")
     
-    overall_score = (beacon_score + sepolia_score) / 2
+    except Exception as e:
+        print(f"❌ Error checking Sepolia: {str(e)}")
+        issues.append(f"Check error: {str(e)}")
+    
+    return score, issues
+
+def print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_issues):
+    print("\n🎯 VALIDATOR READINESS ASSESSMENT")
+    print("="*50)
+    
+    total_score = (beacon_score + sepolia_score) / 2
     all_issues = beacon_issues + sepolia_issues
     
-    print()
-    print_cyan("📊 DETAILED SCORES:")
-    print(f"   Beacon Chain:  {beacon_score}/100")
-    print(f"   Sepolia RPC:   {sepolia_score}/100")
-    print(f"   Overall Score: {overall_score:.0f}/100")
-    print()
+    print(f"\n📊 SCORES:")
+    print(f"   Beacon Chain: {beacon_score}/100")
+    print(f"   Sepolia RPC:  {sepolia_score}/100")
+    print(f"   Overall:      {total_score:.0f}/100")
     
-    # Validator readiness determination
-    if beacon_ok and sepolia_ok and overall_score >= 90:
-        print_green("🟢 EXCELLENT - FULLY READY FOR VALIDATOR")
-        print_green("   ✅ Your nodes are highly reliable for validator operations")
-        print_green("   ✅ Very low risk of missed attestations")
-        print_green("   ✅ Optimal performance expected")
-        validator_ready = True
-        
-    elif beacon_ok and sepolia_ok and overall_score >= 75:
-        print_yellow("🟡 GOOD - SUITABLE FOR VALIDATOR DUTIES")
-        print_yellow("   ✅ Your nodes should perform well for validators")
-        print_yellow("   ⚠️ Monitor performance and address minor issues")
-        validator_ready = True
-        
-    elif beacon_ok and sepolia_ok and overall_score >= 60:
-        print_yellow("🟠 MARGINAL - PROCEED WITH CAUTION")
-        print_yellow("   ⚠️ Your nodes may work but with some risks")
-        print_yellow("   ⚠️ Address issues before running validator")
-        validator_ready = False
-        
+    print(f"\n🎯 VALIDATOR READINESS:")
+    if total_score >= 85 and len(all_issues) == 0:
+        print("🟢 EXCELLENT - READY FOR VALIDATOR")
+        print("   ✅ Your nodes are ready for validator duties")
+        print("   ✅ Low risk of missed attestations")
+        ready = True
+    elif total_score >= 70 and "Still syncing" not in str(all_issues):
+        print("🟡 GOOD - SUITABLE FOR VALIDATOR")
+        print("   ✅ Your nodes should work for validators")
+        print("   ⚠️  Monitor performance")
+        ready = True
+    elif total_score >= 50:
+        print("🟠 MARGINAL - RISKY FOR VALIDATOR")
+        print("   ⚠️  Your nodes may cause issues")
+        print("   ⚠️  Fix problems before running validator")
+        ready = False
     else:
-        print_red("🔴 NOT READY - DO NOT RUN VALIDATOR")
-        print_red("   ❌ Your nodes will likely cause missed attestations")
-        print_red("   ❌ Fix critical issues before considering validator duties")
-        validator_ready = False
+        print("🔴 NOT READY - DO NOT RUN VALIDATOR")
+        print("   ❌ Your nodes will likely cause missed attestations")
+        print("   ❌ Fix all issues first")
+        ready = False
     
-    # Issues summary
     if all_issues:
-        print()
-        print_yellow("⚠️ ISSUES TO ADDRESS:")
+        print(f"\n⚠️  ISSUES TO FIX:")
         for i, issue in enumerate(set(all_issues), 1):
             print(f"   {i}. {issue}")
     
-    # Recommendations
-    print()
-    print_cyan("💡 VALIDATOR RECOMMENDATIONS:")
-    print("   🔧 Critical Requirements:")
-    print("      • Both nodes must be fully synced")
-    print("      • Maintain stable internet connection")
-    print("      • Keep nodes running 24/7")
-    print("      • Monitor for any sync issues")
-    print()
-    print("   📈 Performance Optimization:")
-    print("      • Maintain 25+ peers on beacon node")
-    print("      • Keep response times under 500ms")
-    print("      • Set up monitoring and alerts")
-    print("      • Have backup RPC endpoints ready")
-    print()
-    print("   ⚡ Avoiding Missed Attestations:")
-    print("      • Test your setup during low-stakes periods")
-    print("      • Monitor validator performance metrics")
-    print("      • Ensure redundant network connections")
-    print("      • Keep validator software updated")
+    print(f"\n💡 RECOMMENDATIONS:")
+    print("   • Ensure both nodes are fully synced")
+    print("   • Maintain good internet connection")
+    print("   • Keep response times under 1 second")
+    print("   • Monitor node health regularly")
+    print("   • Have backup RPC endpoints ready")
     
-    print_blue("\n" + "="*65)
-    
-    return validator_ready
+    print("="*50)
+    return ready
 
 def main():
-    """Main execution function"""
     try:
         print_header()
+        beacon_rpc, sepolia_rpc = get_rpc_from_user()
         
-        # Get RPC URLs from user
-        beacon_url, sepolia_url = get_user_rpcs()
+        print("\n🚀 Starting health check...")
+        print("   Testing your nodes for validator readiness...")
         
-        print_blue("\n🚀 Starting comprehensive validator readiness assessment...")
-        print("   This will test your nodes' ability to handle validator duties")
+        beacon_score, beacon_issues = check_beacon_health(beacon_rpc)
+        sepolia_score, sepolia_issues = check_sepolia_health(sepolia_rpc)
         
-        # Run checks
-        beacon_ok, beacon_score, beacon_issues = check_beacon_validator_ready(beacon_url)
-        sepolia_ok, sepolia_score, sepolia_issues = check_sepolia_validator_ready(sepolia_url)
+        ready = print_final_assessment(beacon_score, beacon_issues, sepolia_score, sepolia_issues)
         
-        # Print assessment
-        validator_ready = print_validator_assessment(
-            beacon_ok, beacon_score, beacon_issues,
-            sepolia_ok, sepolia_score, sepolia_issues
-        )
-        
-        # Final message
-        if validator_ready:
-            print_green("\n🎉 Your setup looks good for validator operations!")
+        if ready:
+            print("\n🎉 Your nodes look good for validator operations!")
         else:
-            print_red("\n⚠️ Please address the issues above before running a validator.")
+            print("\n⚠️  Please fix the issues before running a validator.")
         
-        # Exit with appropriate code
-        sys.exit(0 if validator_ready else 1)
+        sys.exit(0 if ready else 1)
         
     except KeyboardInterrupt:
-        print_yellow("\n\n⚠️ Assessment cancelled by user")
+        print("\n\n⚠️  Health check cancelled")
         sys.exit(1)
     except Exception as e:
-        print_red(f"\n❌ Unexpected error: {str(e)}")
+        print(f"\n❌ Error: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
-EOF
-
-echo "🔍 Starting interactive validator readiness checker..."
-echo ""
-
-# Run the checker
-python3 "$TEMP_FILE"
-exit_code=$?
-
-# Clean up
-rm -f "$TEMP_FILE"
-
-exit $exit_code
+'
