@@ -1,2 +1,2 @@
 # eth-node-health-checker
-Professional Ethereum node health monitoring tool
+Ethereum node health monitoring tool
